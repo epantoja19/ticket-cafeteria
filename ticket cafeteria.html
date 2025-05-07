@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gestión de Tickets - Exportación de Café</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    body { background-color: #f5f5dc; color: #4b2e2e; }
+    .ticket-card { border-left: 5px solid #6c757d; margin-bottom: 1rem; }
+    .priority-alta { border-left-color: #dc3545 !important; }
+    .priority-media { border-left-color: #ffc107 !important; }
+    .priority-baja { border-left-color: #28a745 !important; }
+  </style>
+</head>
+
+<body class="container py-4">
+  <h1 class="text-center mb-4">Gestión de Tickets - Exportación de Café</h1>
+
+  <!-- Login / Registro -->
+  <div id="auth-section" class="mb-4">
+    <input id="email" class="form-control mb-2" placeholder="Correo electrónico">
+    <input id="password" class="form-control mb-2" type="password" placeholder="Contraseña">
+    <button class="btn btn-primary" onclick="login()">Iniciar sesión</button>
+    <button class="btn btn-secondary" onclick="register()">Registrar</button>
+    <button class="btn btn-link" onclick="recoverPassword()">¿Olvidaste tu contraseña?</button>
+  </div>
+
+  <!-- Formulario de ticket -->
+  <div id="ticket-form" style="display:none">
+    <h4>Crear Ticket</h4>
+    <div class="row g-2 mb-3">
+      <input id="titulo" class="form-control" placeholder="Título">
+      <textarea id="descripcion" class="form-control" placeholder="Descripción"></textarea>
+      <select id="prioridad" class="form-select">
+        <option value="alta">Alta</option>
+        <option value="media">Media</option>
+        <option value="baja">Baja</option>
+      </select>
+      <input id="tipo" class="form-control" placeholder="Tipo de producto">
+      <input id="cliente" class="form-control" placeholder="Nombre del cliente">
+      <input id="kilos" class="form-control" placeholder="Kilogramos">
+      <input id="pais" class="form-control" placeholder="País de destino">
+      <button class="btn btn-success mt-2" onclick="crearTicket()">Crear Ticket</button>
+    </div>
+  </div>
+
+  <!-- Tickets -->
+  <div id="ticket-list"></div>
+
+  <!-- Exportaciones -->
+  <button class="btn btn-outline-success mt-4" onclick="exportarExcel()">Exportar todos a Excel</button>
+
+  <!-- Gráfico -->
+  <canvas id="graficoPrioridades" class="mt-4"></canvas>
+
+  <!-- Firebase -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getFirestore, collection, addDoc, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyA_3VQnFjlv5YCLgJ85djmDR04Yql0cwaI",
+      authDomain: "agenda-8693b.firebaseapp.com",
+      projectId: "agenda-8693b",
+      storageBucket: "agenda-8693b.appspot.com",
+      messagingSenderId: "866831220063",
+      appId: "1:866831220063:web:6857c40915f87736d24aea"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth();
+
+    document.addEventListener('DOMContentLoaded', () => {
+      onAuthStateChanged(auth, (user) => {
+        if (user) {
+          document.getElementById('auth-section').style.display = 'none';
+          document.getElementById('ticket-form').style.display = 'block';
+          cargarTickets();
+        }
+      });
+    });
+
+    window.login = async () => {
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+      } catch (error) {
+        alert('Error al iniciar sesión: ' + error.message);
+      }
+    };
+
+    window.register = async () => {
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      try {
+        await createUserWithEmailAndPassword(auth, email, password);
+        alert('Usuario registrado');
+      } catch (error) {
+        alert('Error al registrar: ' + error.message);
+      }
+    };
+
+    window.recoverPassword = async () => {
+      const email = document.getElementById('email').value;
+      try {
+        await sendPasswordResetEmail(auth, email);
+        alert('Correo de recuperación enviado');
+      } catch (error) {
+        alert('Error al recuperar contraseña: ' + error.message);
+      }
+    };
+
+    window.crearTicket = async () => {
+      const data = {
+        titulo: titulo.value,
+        descripcion: descripcion.value,
+        prioridad: prioridad.value,
+        tipo: tipo.value,
+        cliente: cliente.value,
+        kilos: kilos.value,
+        pais: pais.value,
+        estado: 'abierto',
+        folio: 'TICKET-' + Date.now()
+      };
+      await addDoc(collection(db, 'tickets'), data);
+      alert('Ticket creado');
+      cargarTickets();
+    };
+
+    async function cargarTickets() {
+      const snapshot = await getDocs(query(collection(db, 'tickets'), orderBy('folio', 'desc')));
+      const contenedor = document.getElementById('ticket-list');
+      contenedor.innerHTML = '';
+      const conteo = { alta: 0, media: 0, baja: 0 };
+
+      snapshot.forEach(doc => {
+        const t = doc.data();
+        conteo[t.prioridad]++;
+        contenedor.innerHTML += `
+          <div class="card ticket-card priority-${t.prioridad}">
+            <div class="card-body">
+              <h5 class="card-title">${t.titulo} (${t.folio})</h5>
+              <p>${t.descripcion}</p>
+              <p><strong>Cliente:</strong> ${t.cliente} | <strong>País:</strong> ${t.pais} | <strong>Kilos:</strong> ${t.kilos}</p>
+              <button class="btn btn-sm btn-outline-danger" onclick='exportarPDF(${JSON.stringify(t)})'>Exportar a PDF</button>
+            </div>
+          </div>`;
+      });
+
+      actualizarGrafico(conteo);
+    }
+
+    window.exportarPDF = (ticket) => {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      doc.text(`Ticket: ${ticket.folio}`, 10, 10);
+      doc.text(`Título: ${ticket.titulo}`, 10, 20);
+      doc.text(`Descripción: ${ticket.descripcion}`, 10, 30);
+      doc.text(`Cliente: ${ticket.cliente}`, 10, 40);
+      doc.text(`País: ${ticket.pais}`, 10, 50);
+      doc.text(`Kilos: ${ticket.kilos}`, 10, 60);
+      doc.save(`${ticket.folio}.pdf`);
+    };
+
+    window.exportarExcel = async () => {
+      const snapshot = await getDocs(collection(db, 'tickets'));
+      const data = snapshot.docs.map(doc => doc.data());
+      const worksheet = XLSX.utils.json_to_sheet(data);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Tickets");
+      XLSX.writeFile(workbook, "tickets_exportacion.xlsx");
+    };
+
+    let chart;
+    function actualizarGrafico(conteo) {
+      if (chart) chart.destroy();
+      const ctx = document.getElementById('graficoPrioridades');
+      chart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['Alta', 'Media', 'Baja'],
+          datasets: [{
+            label: 'Cantidad de tickets',
+            data: [conteo.alta, conteo.media, conteo.baja],
+            backgroundColor: ['#dc3545', '#ffc107', '#28a745']
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            y: { beginAtZero: true }
+          }
+        }
+      });
+    }
+  </script>
+</body>
+
+</html>
